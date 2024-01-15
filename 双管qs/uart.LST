@@ -1,0 +1,239 @@
+C51 COMPILER V9.52.0.0   UART                                                              12/24/2022 09:06:22 PAGE 1   
+
+
+C51 COMPILER V9.52.0.0, COMPILATION OF MODULE UART
+OBJECT MODULE PLACED IN uart.OBJ
+COMPILER INVOKED BY: D:\Program File\keil4\C51\BIN\C51.EXE uart.c ROM(SMALL) BROWSE INCDIR(..\双管qs) DEBUG OBJECTEXTEND
+                    - TABS(2)
+
+line level    source
+
+   1          #include <C8051F040.h>                 // SFR declarations
+   2          #include <stdio.h>
+   3          #include <uart.h>
+   4          
+   5          //unsigned char UART_Buffer[5]={0xF1,0x33,0x30,0x15,0x3C};
+   6          unsigned char UART_Buffer[5]={0,0,0,0,0};
+   7          unsigned char UART_Buffer_Size = 0;
+   8          unsigned char Upload_Flag = 0;//回传
+   9          unsigned char Selfcheck_Flag = 0;
+  10          unsigned char Loopcheck_Flag = 0;
+  11          unsigned char Fire_Flag = 0;
+  12          
+  13          unsigned char StatusCode = 0;
+  14          
+  15          //-----------------------------------------------------------------------------
+  16          // UART0_Init   Variable baud rate, Timer 2, 8-N-1
+  17          //-----------------------------------------------------------------------------
+  18          //
+  19          // Return Value : None
+  20          // Parameters   : None
+  21          //
+  22          // Configure UART0 for operation at <BAUDRATE> 8-N-1 using Timer2 as
+  23          // baud rate source.
+  24          //
+  25          //-----------------------------------------------------------------------------
+  26          void UART0_Init (void)
+  27          {
+  28   1         char SFRPAGE_SAVE;
+  29   1      
+  30   1         SFRPAGE_SAVE = SFRPAGE;             // Preserve SFRPAGE
+  31   1      
+  32   1         SFRPAGE = TMR2_PAGE;
+  33   1      
+  34   1         TMR2CN = 0x00;                      // Timer in 16-bit auto-reload up timer
+  35   1                                             // mode
+  36   1         TMR2CF = 0x08;                      // SYSCLK is time base; no output;
+  37   1                                             // up count only
+  38   1         RCAP2 = - ((long) SYSTEMCLOCK/BAUDRATE/16);
+  39   1         TMR2 = RCAP2;
+  40   1         TR2= 1;                             // Start Timer2
+  41   1      
+  42   1         SFRPAGE = UART0_PAGE;
+  43   1      
+  44   1         SCON0 = 0x50;                       // 8-bit variable baud rate;
+  45   1                                             // 9th bit ignored; RX enabled
+  46   1                                             // clear all flags
+  47   1         SSTA0 = 0x15;                       
+  48   1         ES0 = 1;
+  49   1         IP |= 0x10;
+  50   1         SFRPAGE = SFRPAGE_SAVE;             // Restore SFRPAGE
+  51   1      }
+  52          
+  53          //-----------------------------------------------------------------------------
+  54          // Interrupt Service Routines
+C51 COMPILER V9.52.0.0   UART                                                              12/24/2022 09:06:22 PAGE 2   
+
+  55          //-----------------------------------------------------------------------------
+  56          
+  57          //-----------------------------------------------------------------------------
+  58          // UART0_Interrupt
+  59          //-----------------------------------------------------------------------------
+  60          //
+  61          // This routine is invoked whenever a character is entered or displayed on the
+  62          // Hyperterminal.
+  63          //
+  64          //-----------------------------------------------------------------------------
+  65          
+  66          void UART0_Interrupt (void) interrupt 4
+  67          {
+  68   1        uint8 i=0;
+  69   1        uint16 j=0;
+  70   1        uint8 checksum=0;          //帧数据校验和      
+  71   1        static unsigned char UART_Buffer_temp[5];//暂存校验前数据
+  72   1        
+  73   1         SFRPAGE = UART0_PAGE;
+  74   1      
+  75   1         if (RI0 == 1)
+  76   1         {
+  77   2          for(i=0;i<8;i++);    //延时
+  78   2          if(RI0 == 1)
+  79   2          {
+  80   3            for(i=0;i<5;i++)    //0，1为帧头，2为选管号，3为执行指令，4为奇校验校验和
+  81   3            {
+  82   4              j=0;
+  83   4              while((RI0==0)&&(j<0x0FFF))//避免干扰信号导致未收到完整帧后卡死在此
+  84   4              {j++;}
+  85   4              RI0=0;
+  86   4              UART_Buffer_temp[i]=SBUF0;//需要校验
+  87   4              if((i==2) ||(i==3))
+  88   4              {checksum+=SBUF0;}
+  89   4              else;
+  90   4            }
+  91   3          
+  92   3      //      if((UART_Buffer_temp[0]==0xEB)&&(UART_Buffer_temp[1]==0x90))//帧头，校验和正确后将值赋给全局变量
+  93   3            if((UART_Buffer_temp[0]==0xEB)&&(UART_Buffer_temp[1]==0x90)&&(checksum==UART_Buffer_temp[4]))//帧头，校
+             -验和正确后将值赋给全局变量
+  94   3            {
+  95   4              for(i=0;i<5;i++)
+  96   4              {
+  97   5                UART_Buffer[i]=UART_Buffer_temp[i];
+  98   5              }
+  99   4              
+ 100   4              switch(UART_Buffer[3])
+ 101   4              {
+ 102   5                case 0x11:
+ 103   5                  Selfcheck_Flag=1;
+ 104   5                  break;
+ 105   5                case 0x13:
+ 106   5                  Loopcheck_Flag=1;
+ 107   5                  StatusCode&=~0xF0;//自检后清除发射状态位和哑弹状态位
+ 108   5                  break;
+ 109   5                case 0x14:
+ 110   5                  Fire_Flag=1;
+ 111   5                  break;
+ 112   5                default:
+ 113   5                  break;
+ 114   5              }
+ 115   4              StatusCode&=~0x01;
+C51 COMPILER V9.52.0.0   UART                                                              12/24/2022 09:06:22 PAGE 3   
+
+ 116   4            }else
+ 117   3            {
+ 118   4              Upload_Flag=1;//收到错误数据直接回传
+ 119   4              StatusCode|=0x01;
+ 120   4            }//收到信号错误
+ 121   3          }else;
+ 122   2         }
+ 123   1        SCON0 &= ~0x01;//清除中断标志位，不再进入中断
+ 124   1      }
+ 125          
+ 126          void OSCILLATOR_Init (void)
+ 127          {
+ 128   1         int i;                              // Software timer
+ 129   1      
+ 130   1         char SFRPAGE_SAVE = SFRPAGE;        // Save Current SFR page
+ 131   1      
+ 132   1         SFRPAGE = CONFIG_PAGE;              // Set SFR page
+ 133   1      
+ 134   1         OSCICN = 0x80;                      // Set internal oscillator to run
+ 135   1                                             // at its slowest frequency
+ 136   1      
+ 137   1         CLKSEL = 0x00;                      // Select the internal osc. as
+ 138   1                                             // the SYSTEMCLOCK source
+ 139   1      
+ 140   1         // Initialize external crystal oscillator to use 22.1184 MHz crystal
+ 141   1      
+ 142   1         OSCXCN = 0x67;                      // Enable external crystal osc.
+ 143   1         for (i=0; i < 256; i++);            // Wait at least 1ms
+ 144   1      
+ 145   1         while (!(OSCXCN & 0x80));           // Wait for crystal osc to settle
+ 146   1      
+ 147   1         CLKSEL = 0x01;                      
+ 148   1         // Select external crystal as SYSTEMCLOCK source
+ 149   1      
+ 150   1         SFRPAGE = SFRPAGE_SAVE;             // Restore SFRPAGE
+ 151   1      }
+ 152          
+ 153          //-----------------------------------------------------------------------------
+ 154          // PORT_Init
+ 155          //-----------------------------------------------------------------------------
+ 156          //
+ 157          // Return Value : None
+ 158          // Parameters   : None
+ 159          //
+ 160          // This function configures the crossbar and GPIO ports.
+ 161          //
+ 162          // Pinout:
+ 163          //
+ 164          // P0.0   digital   push-pull     UART TX
+ 165          // P0.1   digital   open-drain    UART RX
+ 166          // P1.6   digital   push-pull     LED
+ 167          //-----------------------------------------------------------------------------
+ 168          void PORT_Init (void)
+ 169          {
+ 170   1        char SFRPAGE_SAVE = SFRPAGE;        // Save Current SFR page
+ 171   1      
+ 172   1        SFRPAGE = CONFIG_PAGE;              // Set SFR page
+ 173   1      
+ 174   1        XBR0     = 0x04;                    // Enable UART0
+ 175   1        XBR1     = 0x00;
+ 176   1        XBR2     = 0x40;                    // Enable crossbar and weak pull-up
+ 177   1      
+C51 COMPILER V9.52.0.0   UART                                                              12/24/2022 09:06:22 PAGE 4   
+
+ 178   1        
+ 179   1        P0MDOUT |= 0x01;                    // Set TX pin to push-pull
+ 180   1      
+ 181   1        P7MDOUT = 0x0F;                    // P7.0-P7.3输出，p5.4-p5.7默认为输入
+ 182   1        P7 = 0xFF;            //初始化，拉高P7
+ 183   1      
+ 184   1        P5MDOUT  = 0x00;    //P5MDOUT:0-开漏输出；1-推挽输出    P5:开漏输出模式下置1切换为数字输入
+ 185   1        P5       = 0xFF;     //0/1/2/3/4/5/6/7为DATA_ZT输入端
+ 186   1      
+ 187   1        
+ 188   1        SFRPAGE = SFRPAGE_SAVE;             // Restore SFR page
+ 189   1        
+ 190   1      
+ 191   1      }
+ 192          
+ 193          void delay_us(uint16 n)   //延时Kus
+ 194          {
+ 195   1         while(--n);
+ 196   1      }
+ 197          
+ 198          void delay_ms(uint16 n)
+ 199          {
+ 200   1         unsigned int i;
+ 201   1         for(;n>0;n--)
+ 202   1         {
+ 203   2           for(i=2211;i>0;i--); 
+ 204   2         }
+ 205   1      }
+ 206          //-----------------------------------------------------------------------------
+ 207          // End Of File
+ 208          //-----------------------------------------------------------------------------   
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    328    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     16    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)

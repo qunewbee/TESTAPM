@@ -1,0 +1,181 @@
+C51 COMPILER V9.52.0.0   MAIN                                                              12/24/2022 09:06:22 PAGE 1   
+
+
+C51 COMPILER V9.52.0.0, COMPILATION OF MODULE MAIN
+OBJECT MODULE PLACED IN main.OBJ
+COMPILER INVOKED BY: D:\Program File\keil4\C51\BIN\C51.EXE main.c ROM(SMALL) BROWSE INCDIR(..\双管qs) DEBUG OBJECTEXTEND
+                    - TABS(2)
+
+line level    source
+
+   1          #include <C8051F040.h>                 // SFR declarations
+   2          #include <stdio.h>
+   3          #include <uart.h>
+   4          
+   5          sbit  Volt12_out = P7^0; 
+   6          sbit  Volt5_out = P7^1;  
+   7          sbit  Lode_1 = P7^2; 
+   8          sbit  Lode_2 = P7^3;  
+   9          
+  10          sbit  JC1 = P5^6;  
+  11          sbit  JC2 = P5^5;  
+  12          sbit  JC3 = P5^7;  
+  13          
+  14          void main (void)
+  15          {
+  16   1        int i;                              // Software timer
+  17   1        uint16 j;
+  18   1        unsigned char UART_Temp[5]={0,0,0,0,0};
+  19   1        uint8 PAGE=SFRPAGE;
+  20   1      
+  21   1        WDTCN = 0xDE;                       // Disable watchdog timer
+  22   1        WDTCN = 0xAD;
+  23   1      
+  24   1        PORT_Init ();
+  25   1        OSCILLATOR_Init ();                 // Initialize oscillator
+  26   1        delay_ms(1000);
+  27   1        UART0_Init ();                      // Initialize UART0
+  28   1        SFRPAGE=PAGE;
+  29   1      
+  30   1        EA = 1;//开启所有中断
+  31   1      
+  32   1        Selfcheck_Flag=1;
+  33   1        Loopcheck_Flag=1;
+  34   1        StatusCode&=~0xFF;//自检后清除发射状态位和哑弹状态位
+  35   1      
+  36   1         while (1)
+  37   1         {
+  38   2          if(Selfcheck_Flag==1)
+  39   2          {
+  40   3            PAGE=SFRPAGE;
+  41   3            SFRPAGE=CONFIG_PAGE;
+  42   3            Lode_1=0;
+  43   3            Lode_2=0;
+  44   3            delay_ms(10);
+  45   3            if((JC1==0)&&(JC1==0))
+  46   3            {StatusCode&=~0x02;}//回路正常
+  47   3            else{StatusCode|=0x02;}//回路故障
+  48   3            Lode_1=1;
+  49   3            Lode_2=1;
+  50   3            SFRPAGE=PAGE; 
+  51   3      
+  52   3            Selfcheck_Flag=0;
+  53   3            Upload_Flag=1;//回路检测后回复
+  54   3            
+C51 COMPILER V9.52.0.0   MAIN                                                              12/24/2022 09:06:22 PAGE 2   
+
+  55   3          }else;
+  56   2          
+  57   2          if(Loopcheck_Flag==1)
+  58   2          {
+  59   3            PAGE=SFRPAGE;
+  60   3            SFRPAGE=CONFIG_PAGE;
+  61   3            Lode_1=0;//检测管1
+  62   3            delay_ms(10);
+  63   3            if(JC3==0)
+  64   3            {
+  65   4              StatusCode|=0x04;
+  66   4              if(StatusCode&0x10)//如果已发射1管
+  67   4              {StatusCode|=0x40;}//哑弹
+  68   4              else{StatusCode&=~0x40;}
+  69   4            }//有弹
+  70   3            else{StatusCode&=~0x04;}
+  71   3            Lode_1=1;
+  72   3      
+  73   3            Lode_2=0;//检测管2
+  74   3            delay_ms(10);
+  75   3            if(JC3==0)
+  76   3            {
+  77   4              StatusCode|=0x08;
+  78   4              if(StatusCode&0x20)
+  79   4              {StatusCode|=0x80;}
+  80   4              else{StatusCode&=~0x80;}
+  81   4            }
+  82   3            else{StatusCode&=~0x08;}
+  83   3            Lode_2=1;
+  84   3            SFRPAGE=PAGE; 
+  85   3      
+  86   3            Loopcheck_Flag=0;
+  87   3            Upload_Flag=1;//自检后回复
+  88   3          }else;
+  89   2      
+  90   2          if(Fire_Flag==1)
+  91   2          {
+  92   3            PAGE=SFRPAGE;
+  93   3            SFRPAGE=CONFIG_PAGE;
+  94   3            if(UART_Buffer[2]&0x04)
+  95   3            {
+  96   4              Lode_1=0;
+  97   4              Volt12_out=0;
+  98   4              Volt5_out=0;
+  99   4              delay_ms(120);
+ 100   4              Lode_1=1;
+ 101   4              StatusCode|=0x10;//1管已发射
+ 102   4            }else;
+ 103   3            if(UART_Buffer[2]&0x08)
+ 104   3            {
+ 105   4              Lode_2=0;
+ 106   4              Volt12_out=0;
+ 107   4              Volt5_out=0;
+ 108   4              delay_ms(120);
+ 109   4              Lode_2=1;
+ 110   4              StatusCode|=0x20;//2管已发射
+ 111   4            }else;
+ 112   3            
+ 113   3      
+ 114   3            Lode_1=1;
+ 115   3            Lode_2=1;
+ 116   3            Volt12_out=1;
+C51 COMPILER V9.52.0.0   MAIN                                                              12/24/2022 09:06:22 PAGE 3   
+
+ 117   3            Volt5_out=1;
+ 118   3            SFRPAGE=PAGE; 
+ 119   3            
+ 120   3            Fire_Flag=0;
+ 121   3            Loopcheck_Flag=1;//发射后进行自检
+ 122   3          }else;
+ 123   2          
+ 124   2          if(Upload_Flag==1)//接收到信息后,或者状态改变时才回传
+ 125   2          {
+ 126   3            UART_Temp[0]=0xEB;
+ 127   3            UART_Temp[1]=0x90;
+ 128   3            UART_Temp[2]=StatusCode;//控制字
+ 129   3            UART_Temp[3]=0x00;//控制字
+ 130   3            UART_Temp[4]=0x00;//校验字
+ 131   3      
+ 132   3            for(i=2;i<4;i++)  //校验和
+ 133   3            {
+ 134   4              UART_Temp[4]+=UART_Temp[i];
+ 135   4            }
+ 136   3            for(i=0;i<5;i++)  //回传信息
+ 137   3            {
+ 138   4              SCON0 &= ~0x02;
+ 139   4              SBUF0=UART_Temp[i];
+ 140   4              j=0;
+ 141   4              while(((SCON0&0x02)==0)&&(j<0x0FFF))//避免卡死在此
+ 142   4                {j++;}
+ 143   4            }
+ 144   3            Upload_Flag=0;
+ 145   3            
+ 146   3            SCON0 &= ~0x02;//清除中断标志位，不再进入中断
+ 147   3          }else;
+ 148   2         }
+ 149   1      }
+ 150                                                                             
+ 151          //-----------------------------------------------------------------------------
+ 152          // End Of File
+ 153          //-----------------------------------------------------------------------------
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =    362    ----
+   CONSTANT SIZE    =      5    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----       6
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
